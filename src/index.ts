@@ -50,6 +50,10 @@ export default {
         name: '恋云课程',
         icon: 'Microscope',
         commandType: 'research.create_activity',
+        payload: {
+          type: 'plugin',
+          data: { teacherWidgetId: 'lianyun_course_dashboard', width: 480 },
+        },
       },
     ],
   },
@@ -200,6 +204,35 @@ export default {
     };
 
     // 3.0 获取平台真实的班级与学生名册 (Query real DB tables: classes, students, class_students)
+    await commandBus.registerHandler('research.get_activities', {
+      async execute() {
+        try {
+          if (rawDb?.prepare) {
+            const rows = rawDb.prepare('SELECT * FROM plugin_research_activities ORDER BY created_at DESC').all();
+            const activities = rows.map((r: any) => ({
+              id: r.id,
+              title: r.title,
+              description: r.description,
+              teacherId: r.teacher_id,
+              currentPhase: r.current_phase,
+              config: typeof r.config === 'string' ? JSON.parse(r.config) : (r.config || {}),
+              createdAt: r.created_at,
+              updatedAt: r.updated_at,
+            }));
+            return { success: true, activities };
+          }
+        } catch (e) {}
+        // Fallback to memory store
+        const activities = Array.from(memStore.activities.values()).map((a: any) => ({
+          id: a.id, title: a.title, description: a.description,
+          teacherId: a.teacher_id, currentPhase: a.current_phase,
+          config: typeof a.config === 'string' ? JSON.parse(a.config) : (a.config || {}),
+          createdAt: a.created_at, updatedAt: a.updated_at,
+        }));
+        return { success: true, activities };
+      },
+    });
+
     await commandBus.registerHandler('research.get_classes', {
       async execute() {
         try {

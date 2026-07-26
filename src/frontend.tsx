@@ -1227,16 +1227,305 @@ export function ResearchClassroomToolWidget() {
   );
 }
 
-// 4. 学生端看板组件
-export function StudentResearchBoardWidget() {
+// 4. 教师白板卡片组件 (teacher.dashboard.widget)
+export function TeacherWhiteboardWidget(props: any) {
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [activePid, setActivePid] = useState('');
+  const [broadcastMsg, setBroadcastMsg] = useState('');
+
+  const activeProj = projects.find((p) => p.id === activePid);
+
+  useEffect(() => {
+    if (ctx?.invokeCommand) {
+      ctx.invokeCommand('research.get_activities', {}).then((res: any) => {
+        if (res?.success && res.activities) setProjects(res.activities);
+      }).catch(() => {});
+    }
+  }, []);
+
+  const handlePushToStudents = () => {
+    setBroadcastMsg(`已推送课题「${activeProj?.title || '—'}」到学生端`);
+    setTimeout(() => setBroadcastMsg(''), 3000);
+  };
+
   return (
-    <div style={{ padding: 16, backgroundColor: '#ffffff', color: '#0f172a', borderRadius: 10, fontSize: 13, border: '1px solid #e2e8f0' }}>
-      <span style={{ fontWeight: '600', color: '#059669' }}>📋 我的课题探究任务与阶段提交看板</span>
+    <div style={{ padding: 14, backgroundColor: '#ffffff', borderRadius: 10, border: '1px solid #e2e8f0', fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
+        <span style={{ fontSize: 14 }}>🔬</span>
+        <span style={{ fontWeight: '700', color: '#0f172a', fontSize: 13 }}>课题控制台</span>
+        <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{props.elementId ? `#${props.elementId.slice(-6)}` : ''}</span>
+      </div>
+
+      {projects.length === 0 ? (
+        <div style={{ color: '#94a3b8', padding: '12px 0', textAlign: 'center' }}>暂无课题，请在管理页创建</div>
+      ) : (
+        <>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 11, color: '#64748b', display: 'block', marginBottom: 4 }}>当前课题</label>
+            <select
+              value={activePid}
+              onChange={(e) => setActivePid(e.target.value)}
+              style={{ width: '100%', padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 12, backgroundColor: '#ffffff' }}
+            >
+              <option value="">— 选择课题 —</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.title}</option>
+              ))}
+            </select>
+          </div>
+
+          {activeProj && (
+            <div style={{ backgroundColor: '#f8fafc', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                <span style={{ color: '#64748b' }}>当前阶段</span>
+                <span style={{ fontWeight: '600', color: '#2563eb' }}>{activeProj.currentPhase}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 4 }}>
+                <span style={{ color: '#64748b' }}>提交文件类型</span>
+                <span style={{ color: '#334155' }}>{(activeProj.config.allowedFileTypes || []).join(', ') || '—'}</span>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <button
+              onClick={handlePushToStudents}
+              disabled={!activePid}
+              style={{ backgroundColor: activePid ? '#2563eb' : '#94a3b8', color: '#ffffff', border: 'none', borderRadius: 6, padding: '7px 10px', fontSize: 12, fontWeight: '600', cursor: activePid ? 'pointer' : 'not-allowed' }}
+            >
+              📢 推送到学生端
+            </button>
+            <button
+              onClick={() => { if (activeProj && ctx?.invokeCommand) ctx.invokeCommand('research.update_phase', { activityId: activeProj.id, targetPhase: 'SUBMISSION', override: true }).catch(() => {}); }}
+              disabled={!activePid}
+              style={{ backgroundColor: activePid ? '#059669' : '#94a3b8', color: '#ffffff', border: 'none', borderRadius: 6, padding: '7px 10px', fontSize: 12, fontWeight: '600', cursor: activePid ? 'pointer' : 'not-allowed' }}
+            >
+              📤 开启成果提交
+            </button>
+            <button
+              onClick={() => { if (activeProj && ctx?.invokeCommand) ctx.invokeCommand('research.update_phase', { activityId: activeProj.id, targetPhase: 'PEER_REVIEW', override: true }).catch(() => {}); }}
+              disabled={!activePid}
+              style={{ backgroundColor: activePid ? '#7c3aed' : '#94a3b8', color: '#ffffff', border: 'none', borderRadius: 6, padding: '7px 10px', fontSize: 12, fontWeight: '600', cursor: activePid ? 'pointer' : 'not-allowed' }}
+            >
+              🔍 开启互评打分
+            </button>
+          </div>
+
+          {broadcastMsg && (
+            <div style={{ marginTop: 8, backgroundColor: '#dbeafe', color: '#1e40af', padding: '6px 10px', borderRadius: 6, fontSize: 11, textAlign: 'center' }}>
+              {broadcastMsg}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-// 5. 前端插件入口 activate & deactivate
+// 5. 学生端交互式课题看板 (含提交、浏览同伴作品、互评打分)
+export function StudentResearchView() {
+  const [tab, setTab] = useState<'submit' | 'browse' | 'review' | 'scores'>('submit');
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [mySub, setMySub] = useState<any>(null);
+  const [subTitle, setSubTitle] = useState('');
+  const [subSummary, setSubSummary] = useState('');
+  const [attachName, setAttachName] = useState('');
+  const [reviewTarget, setReviewTarget] = useState<any>(null);
+  const [reviewScores, setReviewScores] = useState<{ rubricId: string; score: number; comment: string }[]>([]);
+
+  // Mock peer submissions for browse/review
+  const mockSubmissions = [
+    { id: 'sub_1', title: '基于嵌入式传感器的实验报告', studentId: '张伟', summary: '使用 Arduino 搭建多光谱采集系统', attachments: ['report.pdf', 'data.xlsx'], aiCheck: { passed: true, completenessScore: 92 }, status: 'SUBMITTED' },
+    { id: 'sub_2', title: '微水体生态数据分析', studentId: '李娜', summary: '对校园湖泊水质进行多参数实时监测', attachments: ['analysis.docx', 'charts.zip'], aiCheck: { passed: true, completenessScore: 88 }, status: 'SUBMITTED' },
+    { id: 'sub_3', title: '智慧农业物联网探究', studentId: '王强', summary: '基于 ESP32 的多光谱微型物联网搭建', attachments: ['paper.pdf'], aiCheck: { passed: true, completenessScore: 95 }, status: 'SUBMITTED' },
+  ];
+
+  useEffect(() => {
+    setSubmissions(mockSubmissions);
+  }, []);
+
+  const handleSubmit = () => {
+    const newSub = { id: `sub_${Date.now()}`, title: subTitle, studentId: '我', summary: subSummary, attachments: attachName ? [attachName] : [], aiCheck: { passed: !!attachName, completenessScore: attachName ? 90 : 40 }, status: 'SUBMITTED' };
+    setMySub(newSub);
+    setSubmissions([newSub, ...mockSubmissions]);
+    setSubTitle(''); setSubSummary(''); setAttachName('');
+  };
+
+  const handleStartReview = (sub: any) => {
+    setReviewTarget(sub);
+    setTab('review');
+    setReviewScores([
+      { rubricId: 'rubric_1', score: 0, comment: '' },
+      { rubricId: 'rubric_2', score: 0, comment: '' },
+      { rubricId: 'rubric_3', score: 0, comment: '' },
+    ]);
+  };
+
+  const rubrics = [
+    { id: 'rubric_1', name: '立题创新与完整性', max: 35 },
+    { id: 'rubric_2', name: '研究方法与数据', max: 35 },
+    { id: 'rubric_3', name: '成果展示与表达', max: 30 },
+  ];
+
+  const totalScore = reviewScores.reduce((s, r) => s + r.score, 0);
+
+  const tabs = [
+    { key: 'submit', label: '📤 提交成果' },
+    { key: 'browse', label: '👥 同伴作品' },
+    { key: 'review', label: '⭐ 互评打分' },
+    { key: 'scores', label: '📊 我的成绩' },
+  ];
+
+  return (
+    <div style={{ padding: 20, backgroundColor: '#f8fafc', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
+      {/* Tab 导航 */}
+      <div style={{ display: 'flex', gap: 4, backgroundColor: '#e2e8f0', padding: 3, borderRadius: 10, marginBottom: 20 }}>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key as any)}
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 8, border: 'none',
+              backgroundColor: tab === t.key ? '#ffffff' : 'transparent',
+              color: tab === t.key ? '#2563eb' : '#64748b',
+              fontWeight: tab === t.key ? '700' : '500', fontSize: 12, cursor: 'pointer',
+              boxShadow: tab === t.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ===== 提交成果 ===== */}
+      {tab === 'submit' && (
+        <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 20 }}>
+          <h3 style={{ margin: '0 0 16px 0', fontSize: 16, color: '#059669' }}>📤 提交课题成果</h3>
+
+          {mySub ? (
+            <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 16 }}>
+              <div style={{ fontWeight: '700', color: '#166534', marginBottom: 4 }}>✅ 已提交</div>
+              <div style={{ fontSize: 13, color: '#15803d' }}>{mySub.title}</div>
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>AI 预审: {mySub.aiCheck.passed ? '通过' : '待完善'} ({mySub.aiCheck.completenessScore}分)</div>
+              <button onClick={() => setMySub(null)} style={{ marginTop: 10, backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#dc2626', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>重新提交</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <input placeholder="成果标题" value={subTitle} onChange={(e) => setSubTitle(e.target.value)} style={{ padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 13 }} />
+              <textarea placeholder="成果摘要与方法简述" rows={3} value={subSummary} onChange={(e) => setSubSummary(e.target.value)} style={{ padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 13 }} />
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <input placeholder="附件文件名 (如 report.pdf)" value={attachName} onChange={(e) => setAttachName(e.target.value)} style={{ flex: 1, padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 13 }} />
+                <select value={attachName} onChange={(e) => setAttachName(e.target.value)} style={{ padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 13 }}>
+                  <option value="">选择测试文件</option>
+                  <option value="report.pdf">report.pdf</option>
+                  <option value="project.zip">project.zip</option>
+                  <option value="data.xlsx">data.xlsx</option>
+                </select>
+              </div>
+              <button onClick={handleSubmit} disabled={!subTitle} style={{ alignSelf: 'flex-end', backgroundColor: subTitle ? '#059669' : '#94a3b8', color: '#ffffff', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: '600', cursor: subTitle ? 'pointer' : 'not-allowed', fontSize: 13 }}>提交成果</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== 浏览同伴作品 ===== */}
+      {tab === 'browse' && (
+        <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 20 }}>
+          <h3 style={{ margin: '0 0 16px 0', fontSize: 16, color: '#1e40af' }}>👥 同伴作品浏览</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {submissions.map((sub) => (
+              <div key={sub.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 14, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10 }}>
+                <div>
+                  <div style={{ fontWeight: '700', fontSize: 13, color: '#0f172a' }}>{sub.title}</div>
+                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{sub.studentId} · {sub.summary.slice(0, 30)}...</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>附件: {(sub.attachments || []).join(', ') || '无'} · 状态: {sub.status}</div>
+                </div>
+                <button onClick={() => handleStartReview(sub)} style={{ backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: '600', cursor: 'pointer' }}>评价打分</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ===== 互评打分 ===== */}
+      {tab === 'review' && (
+        <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 20 }}>
+          <h3 style={{ margin: '0 0 16px 0', fontSize: 16, color: '#7c3aed' }}>⭐ 互评打分</h3>
+          {reviewTarget ? (
+            <>
+              <div style={{ backgroundColor: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <div style={{ fontWeight: '700', color: '#5b21b6', fontSize: 14 }}>{reviewTarget.title}</div>
+                <div style={{ fontSize: 12, color: '#6d28d9', marginTop: 4 }}>作者: {reviewTarget.studentId} · {reviewTarget.summary}</div>
+              </div>
+              {rubrics.map((r) => {
+                const rs = reviewScores.find((s) => s.rubricId === r.id)!;
+                return (
+                  <div key={r.id} style={{ marginBottom: 14, padding: 12, backgroundColor: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontWeight: '600', fontSize: 13, color: '#0f172a' }}>{r.name}</span>
+                      <span style={{ fontSize: 12, color: '#64748b' }}>0-{r.max} 分</span>
+                    </div>
+                    <input
+                      type="range" min={0} max={r.max} value={rs.score}
+                      onChange={(e) => setReviewScores(reviewScores.map((s) => s.rubricId === r.id ? { ...s, score: Number(e.target.value) } : s))}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#94a3b8' }}>
+                      <span>0</span><span style={{ fontWeight: '700', color: '#2563eb' }}>{rs.score}</span><span>{r.max}</span>
+                    </div>
+                    <input
+                      placeholder="评语（选填）" value={rs.comment}
+                      onChange={(e) => setReviewScores(reviewScores.map((s) => s.rubricId === r.id ? { ...s, comment: e.target.value } : s))}
+                      style={{ width: '100%', marginTop: 6, padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 12, boxSizing: 'border-box' }}
+                    />
+                  </div>
+                );
+              })}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, backgroundColor: '#dbeafe', borderRadius: 8 }}>
+                <span style={{ fontWeight: '700', color: '#1e40af' }}>总分: {totalScore} / 100</span>
+                <button onClick={() => { alert(`评分已提交！总分 ${totalScore}/100`); setReviewTarget(null); setTab('browse'); }} style={{ backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontWeight: '600', cursor: 'pointer' }}>提交评分</button>
+              </div>
+            </>
+          ) : (
+            <div style={{ color: '#94a3b8', textAlign: 'center', padding: 20 }}>请先在「同伴作品」中选择要评价的成果</div>
+          )}
+        </div>
+      )}
+
+      {/* ===== 我的成绩 ===== */}
+      {tab === 'scores' && (
+        <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 20 }}>
+          <h3 style={{ margin: '0 0 16px 0', fontSize: 16, color: '#b45309' }}>📊 我的成绩单</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ padding: 14, backgroundColor: '#fef3c7', border: '1px solid #fde68a', borderRadius: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: '600', color: '#b45309' }}>协作分</span>
+                <span style={{ fontSize: 18, fontWeight: '700', color: '#d97706' }}>85</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#92400e', marginTop: 4 }}>课题协作维度 · 由教师终结评定</div>
+            </div>
+            <div style={{ padding: 14, backgroundColor: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: '600', color: '#1e40af' }}>创新分</span>
+                <span style={{ fontSize: 18, fontWeight: '700', color: '#2563eb' }}>92</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#1e40af', marginTop: 4 }}>探究创新维度 · 由教师终结评定</div>
+            </div>
+            <div style={{ padding: 14, backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: '600', color: '#166534' }}>互评均分</span>
+                <span style={{ fontSize: 18, fontWeight: '700', color: '#16a34a' }}>88</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#15803d', marginTop: 4 }}>2 名同伴已完成评分</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 6. 前端插件入口 activate & deactivate
 export async function activate(hostCtx: any) {
   ctx = hostCtx;
 
@@ -1274,7 +1563,16 @@ export async function activate(hostCtx: any) {
       id: 'student_lianyun_view',
       label: '课题探究看板',
       icon: 'FileText',
-      component: StudentResearchBoardWidget,
+      component: StudentResearchView,
+    });
+  } catch (e) {}
+
+  try {
+    hostCtx.ui.registerExtensionPoint('teacher.dashboard.widget', {
+      id: 'lianyun_course_dashboard',
+      label: '恋云课程控制台',
+      icon: 'Microscope',
+      component: TeacherWhiteboardWidget,
     });
   } catch (e) {}
 }
@@ -1285,7 +1583,8 @@ export function deactivate() {
     ctx.ui.unregisterExtensionPoint('workspace.view', 'lianyun_course_workspace');
     ctx.ui.unregisterExtensionPoint('classroom.tool', 'tool_lianyun_course');
     ctx.ui.unregisterExtensionPoint('student.view', 'student_lianyun_view');
+    ctx.ui.unregisterExtensionPoint('teacher.dashboard.widget', 'lianyun_course_dashboard');
   }
 }
 
-export default { activate, deactivate, ResearchWorkspaceMainView, ResearchClassroomToolWidget };
+export default { activate, deactivate, ResearchWorkspaceMainView, ResearchClassroomToolWidget, TeacherWhiteboardWidget, StudentResearchView };
