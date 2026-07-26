@@ -26,7 +26,7 @@ export default {
   manifest: {
     id: 'lianyun-course',
     name: '恋云课程',
-    version: '1.2.1',
+    version: '1.2.2',
     description: '恋云课程 —— PBL / STEAM 课题全流程管理、多版本提交、盲审互评、积分入账与结构化 ZIP 归档的全栈参考插件',
     author: 'OpenLearn Next',
     repository: 'https://github.com/openlearn-next/lianyun-course',

@@ -4,6 +4,20 @@ All notable changes to the **恋云课程 (Lianyun Course) Plugin** (`lianyun-co
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.2] - 2026-07-26
+
+### Changed
+- **Plugin Rename**: Plugin identity renamed from `@aymwoo/plugin-research-workflow` to `lianyun-course`（恋云课程）. All manifest IDs, extension point IDs, UI labels, and repository URLs updated accordingly. Git repository migrated to `github.com/openlearn-next/lianyun-course`.
+- **课题列表与详情分页**: 点击「进入管理」按钮后进入独立的课题详情页，不再同时展示课题列表。详情页顶部增加面包屑导航（`← 返回课题列表`）。
+
+### Removed
+- **预设班级数据名册**: 移除前端 `MOCK_CLASSES` 硬编码班级数据与服务端 seed class 注入逻辑及 fallback mock 数据。班级名册现在完全依赖平台 SQLite 或 `/api/classes` 接口实时获取。
+
+### Added
+- **README.md**: 新增项目文档，涵盖安装、功能概览、扩展点、命令/事件/Action 参考、权限与数据库表说明。
+
+---
+
 ## [1.2.1] - 2026-07-26
 
 ### Changed
