@@ -102,6 +102,7 @@ function WorkflowPhaseStepper({ currentPhase, onSelectPhase, isTeacher }: { curr
 // 2. 主页面控制台 (包含 教师端 / 学生端 角色视角)
 export function ResearchWorkspaceMainView() {
   const [role, setRole] = useState<'teacher' | 'student'>('teacher');
+  const [view, setView] = useState<'list' | 'detail'>('list');
   const [classList, setClassList] = useState<ClassItem[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
 
@@ -579,7 +580,7 @@ export function ResearchWorkspaceMainView() {
         </div>
       </div>
 
-      {/* 课题列表管理 (RESEARCH PROJECT LIST & MANAGEMENT) */}
+      {view === 'list' && (
       <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 14, marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
         <div style={{ fontSize: 12, fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: 12, letterSpacing: 0.5 }}>
           课题列表管理 (RESEARCH PROJECT LIST)
@@ -630,7 +631,7 @@ export function ResearchWorkspaceMainView() {
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={() => setActiveProjectId(proj.id)}
+                      onClick={() => { setActiveProjectId(proj.id); setView('detail'); }}
                       style={{
                         backgroundColor: isSelected ? '#2563eb' : '#f1f5f9',
                         color: isSelected ? '#ffffff' : '#1e293b',
@@ -659,6 +660,21 @@ export function ResearchWorkspaceMainView() {
             })}
           </div>
         )}
+      </div>
+      )}
+      {view === 'detail' && activeProject && (
+      <>
+      {/* 面包屑导航 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <button
+          onClick={() => { setView('list'); setActiveProjectId(''); }}
+          style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: 13, fontWeight: '600', display: 'flex', alignItems: 'center', gap: 4 }}
+        >
+          <span>←</span>
+          <span>返回课题列表</span>
+        </button>
+        <span style={{ color: '#94a3b8' }}>/</span>
+        <span style={{ fontSize: 14, fontWeight: '700', color: '#0f172a' }}>{activeProject.title}</span>
       </div>
 
       {/* ========================================================================= */}
@@ -1056,7 +1072,8 @@ export function ResearchWorkspaceMainView() {
           </div>
         </div>
       )}
-
+      </>
+      )}
       {/* 教师端：创建新学习项目 Modal 弹窗 */}
       {showCreateModal && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
