@@ -1,0 +1,26 @@
+{
+  "name": "lianyun-course",
+  "version": "1.2.1",
+  "private": true,
+  "type": "module",
+  "description": "恋云课程 —— OpenLearn Next 研究性学习工作流插件，支持 PBL / STEAM 阶段式课题管理、盲审互评与积分归档",
+  "author": "OpenLearn Next",
+  "repository": "https://github.com/openlearn-next/lianyun-course",
+  "homepage": "https://github.com/openlearn-next/lianyun-course",
+  "scripts": {
+    "build": "npx openlearn-plugin-sdk build"
+  },
+  "dependencies": {
+    "@openlearn/plugin-sdk": "^3.2.0"
+  },
+  "peerDependencies": {
+    "react": ">=17",
+    "react-dom": ">=17"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "esbuild": "^0.24.0",
+    "jszip": "^3.10.0",
+    "typescript": "^5.0.0"
+  }
+}
