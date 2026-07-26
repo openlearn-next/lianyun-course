@@ -44,44 +44,6 @@ const FILE_TYPE_OPTIONS = [
   { label: '🖼️ 设计图纸与矢量图 (.png, .jpg, .svg)', exts: ['.png', '.jpg', '.svg'] },
 ];
 
-// 预设班级数据名册
-const MOCK_CLASSES: ClassItem[] = [
-  {
-    id: 'class_101',
-    name: '计算机科学与技术2601班',
-    grade: '2026级',
-    students: [
-      { id: 'stu_101', name: '张伟', studentNo: '260101', avatar: '👨‍🎓' },
-      { id: 'stu_102', name: '李娜', studentNo: '260102', avatar: '👩‍🎓' },
-      { id: 'stu_103', name: '王强', studentNo: '260103', avatar: '👨‍🎓' },
-      { id: 'stu_104', name: '刘洋', studentNo: '260104', avatar: '👩‍🎓' },
-      { id: 'stu_105', name: '陈杰', studentNo: '260105', avatar: '👨‍🎓' },
-      { id: 'stu_106', name: '杨光', studentNo: '260106', avatar: '👨‍🎓' },
-      { id: 'stu_107', name: '黄磊', studentNo: '260107', avatar: '👨‍🎓' },
-      { id: 'stu_108', name: '周敏', studentNo: '260108', avatar: '👩‍🎓' },
-      { id: 'stu_109', name: '吴涛', studentNo: '260109', avatar: '👨‍🎓' },
-      { id: 'stu_110', name: '徐静', studentNo: '260110', avatar: '👩‍🎓' },
-      { id: 'stu_111', name: '孙勇', studentNo: '260111', avatar: '👨‍🎓' },
-      { id: 'stu_112', name: '朱丽', studentNo: '260112', avatar: '👩‍🎓' },
-    ],
-  },
-  {
-    id: 'class_102',
-    name: 'STEAM机器人创新实验班',
-    grade: '2026级',
-    students: [
-      { id: 'stu_201', name: '蔡明', studentNo: '260201', avatar: '👨‍🎓' },
-      { id: 'stu_202', name: '丁力', studentNo: '260202', avatar: '👨‍🎓' },
-      { id: 'stu_203', name: '范琳', studentNo: '260203', avatar: '👩‍🎓' },
-      { id: 'stu_204', name: '彭辉', studentNo: '260204', avatar: '👨‍🎓' },
-      { id: 'stu_205', name: '潘婷', studentNo: '260205', avatar: '👩‍🎓' },
-      { id: 'stu_206', name: '杜浩', studentNo: '260206', avatar: '👨‍🎓' },
-      { id: 'stu_207', name: '汪洋', studentNo: '260207', avatar: '👨‍🎓' },
-      { id: 'stu_208', name: '薛飞', studentNo: '260208', avatar: '👨‍🎓' },
-    ],
-  },
-];
-
 // 1. 浅色 9 阶段 Stepper 组件
 function WorkflowPhaseStepper({ currentPhase, onSelectPhase, isTeacher }: { currentPhase: string; onSelectPhase?: (phase: string) => void; isTeacher?: boolean }) {
   const phases = [
@@ -140,8 +102,8 @@ function WorkflowPhaseStepper({ currentPhase, onSelectPhase, isTeacher }: { curr
 // 2. 主页面控制台 (包含 教师端 / 学生端 角色视角)
 export function ResearchWorkspaceMainView() {
   const [role, setRole] = useState<'teacher' | 'student'>('teacher');
-  const [classList, setClassList] = useState<ClassItem[]>(MOCK_CLASSES);
-  const [selectedClassId, setSelectedClassId] = useState<string>('cls_comp_2601');
+  const [classList, setClassList] = useState<ClassItem[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
 
   // 组件加载时自动连接 SQLite 及平台 /api/classes 接口读取真实班级与学生名册
   useEffect(() => {
@@ -219,17 +181,17 @@ export function ResearchWorkspaceMainView() {
   const [formatError, setFormatError] = useState<string | null>(null);
 
   const activeProject = projects.find((p) => p.id === activeProjectId) || projects[0];
-  const activeClass = classList.find((c) => c.id === selectedClassId) || classList[0] || MOCK_CLASSES[0];
+  const activeClass = classList.find((c) => c.id === selectedClassId) || classList[0] || null;
   const activeGroups = activeProject ? (projectGroups[activeProject.id] || []) : [];
   const activeSubs = activeProject ? (projectSubmissions[activeProject.id] || []) : [];
 
   // 获取尚未分配到小组的学生列表
   const assignedStudentIds = new Set(activeGroups.flatMap((g) => g.memberIds));
-  const unassignedStudents = activeClass.students.filter((s) => !assignedStudentIds.has(s.id));
+  const unassignedStudents = activeClass ? activeClass.students.filter((s) => !assignedStudentIds.has(s.id)) : [];
 
   // 教师端：一键自动随机分组算法
   const handleAutoRandomGrouping = () => {
-    if (!activeProject) return;
+    if (!activeProject || !activeClass) return;
     const students = [...activeClass.students];
     // 洗牌算法 Shuffle
     for (let i = students.length - 1; i > 0; i--) {
@@ -307,7 +269,7 @@ export function ResearchWorkspaceMainView() {
 
   // 教师端：支持组间拖拽/下拉移动学生 (支持组间拖拽与未分组池平移)
   const handleMoveMember = (sourceGroupId: string, targetGroupId: string, studentId: string) => {
-    if (!activeProject || sourceGroupId === targetGroupId) return;
+    if (!activeProject || !activeClass || sourceGroupId === targetGroupId) return;
 
     let movedStudentDetail: GroupMemberDetail | undefined;
 
@@ -1209,7 +1171,6 @@ export function ResearchClassroomToolWidget() {
           border: 'none',
           cursor: 'pointer',
         }}
-        title="研究性学习工作流 (Research Workflow)"
         title="恋云课程 (Lianyun Course)"
       >
         <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>

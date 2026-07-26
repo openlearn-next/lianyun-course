@@ -194,7 +194,6 @@ export default {
         id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         type,
         source: 'lianyun-course',
-        source: 'lianyun-course',
         payload,
         timestamp: Date.now(),
       });
@@ -211,57 +210,9 @@ export default {
               ORDER BY c.created_at DESC
             `).all();
 
-            // 如果数据库尚未存入真实班级，注入标准班级及名册到 OpenLearn 系统 SQLite 中
             if (!dbClasses || dbClasses.length === 0) {
-              const seedClasses = [
-                {
-                  id: 'cls_comp_2601',
-                  name: '计算机科学与技术2601班',
-                  description: '2026级计算机学院探究试点班级',
-                  students: [
-                    { id: 'stu_r101', name: '张伟', studentNo: '20260101' },
-                    { id: 'stu_r102', name: '李娜', studentNo: '20260102' },
-                    { id: 'stu_r103', name: '王强', studentNo: '20260103' },
-                    { id: 'stu_r104', name: '刘洋', studentNo: '20260104' },
-                    { id: 'stu_r105', name: '陈杰', studentNo: '20260105' },
-                    { id: 'stu_r106', name: '杨光', studentNo: '20260106' },
-                    { id: 'stu_r107', name: '黄磊', studentNo: '20260107' },
-                    { id: 'stu_r108', name: '周敏', studentNo: '20260108' },
-                    { id: 'stu_r109', name: '吴涛', studentNo: '20260109' },
-                    { id: 'stu_r110', name: '徐静', studentNo: '20260110' },
-                  ],
-                },
-                {
-                  id: 'cls_steam_2602',
-                  name: 'STEAM 机器人与物联网创新班',
-                  description: '人工智能与STEAM跨学科实验班',
-                  students: [
-                    { id: 'stu_r201', name: '蔡明', studentNo: '20260201' },
-                    { id: 'stu_r202', name: '丁力', studentNo: '20260202' },
-                    { id: 'stu_r203', name: '范琳', studentNo: '20260203' },
-                    { id: 'stu_r204', name: '彭辉', studentNo: '20260204' },
-                    { id: 'stu_r205', name: '潘婷', studentNo: '20260205' },
-                    { id: 'stu_r206', name: '杜浩', studentNo: '20260206' },
-                  ],
-                },
-              ];
-
-              const now = Date.now();
-              const insertClass = rawDb.prepare('INSERT INTO classes (id, name, description, created_at) VALUES (?, ?, ?, ?)');
-              const insertStudent = rawDb.prepare('INSERT OR IGNORE INTO students (id, name, student_number, created_at) VALUES (?, ?, ?, ?)');
-              const insertClassStudent = rawDb.prepare('INSERT OR IGNORE INTO class_students (class_id, student_id, joined_at) VALUES (?, ?, ?)');
-
-              for (const c of seedClasses) {
-                insertClass.run(c.id, c.name, c.description, now);
-                for (const s of c.students) {
-                  insertStudent.run(s.id, s.name, s.studentNo, now);
-                  insertClassStudent.run(c.id, s.id, now);
-                }
-              }
-
-              dbClasses = rawDb.prepare('SELECT id, name, description FROM classes ORDER BY created_at DESC').all();
+              return { success: true, classes: [] };
             }
-
             // 从 SQLite 查询真实班级及关联名册
             const realClasses = dbClasses.map((c: any) => {
               const students = rawDb.prepare(`
@@ -291,23 +242,7 @@ export default {
           console.error('[ResearchWorkflow] Fetch real classes from SQLite failed:', e);
         }
 
-        // Fallback mock
-        return {
-          success: true,
-          classes: [
-            {
-              id: 'cls_comp_2601',
-              name: '计算机科学与技术2601班',
-              grade: '平台注册真实班级',
-              students: [
-                { id: 'stu_r101', name: '张伟', studentNo: '20260101', avatar: '👨‍🎓' },
-                { id: 'stu_r102', name: '李娜', studentNo: '20260102', avatar: '👩‍🎓' },
-                { id: 'stu_r103', name: '王强', studentNo: '20260103', avatar: '👨‍🎓' },
-                { id: 'stu_r104', name: '刘洋', studentNo: '20260104', avatar: '👩‍🎓' },
-              ],
-            },
-          ],
-        };
+        return { success: true, classes: [] };
       },
     });
 
