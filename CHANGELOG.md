@@ -4,7 +4,7 @@ All notable changes to the **恋云课程 (Lianyun Course) Plugin** (`lianyun-co
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.2.3] - 2026-07-27
 
 ### Fixed
 - **构建失败：3 个 SDK Token 未导出** — 升级 `@openlearn/plugin-sdk` 从 `^3.2.0` 到 `^3.4.3`。SDK 3.2.0 发布的 `dist/index.d.ts` 已过期，缺失 `IPointsLedgerServiceToken` / `IPointsDimensionRegistryToken` / `IActivityRegistryToken` 三个 DI Token（源码侧已在使用），导致 `npx openlearn-plugin-sdk build` 报 `No matching export`。3.4.3 已补全 28 个 Token，与官方 DI 字典（https://openlearn-next-v2.readthedocs.io/zh-cn/latest/api/di-tokens.html）一致。
