@@ -4,6 +4,20 @@ All notable changes to the **恋云课程 (Lianyun Course) Plugin** (`lianyun-co
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+- **构建失败：3 个 SDK Token 未导出** — 升级 `@openlearn/plugin-sdk` 从 `^3.2.0` 到 `^3.4.3`。SDK 3.2.0 发布的 `dist/index.d.ts` 已过期，缺失 `IPointsLedgerServiceToken` / `IPointsDimensionRegistryToken` / `IActivityRegistryToken` 三个 DI Token（源码侧已在使用），导致 `npx openlearn-plugin-sdk build` 报 `No matching export`。3.4.3 已补全 28 个 Token，与官方 DI 字典（https://openlearn-next-v2.readthedocs.io/zh-cn/latest/api/di-tokens.html）一致。
+
+### Changed
+- **API 形状对齐**：按 3.4.3 字典修正三处调用形状
+  - `pointsDimensionRegistry.registerDimension()` 为**同步方法**，移除错误的 `await ... .catch(() => {})` 写法（`void` 返回值无 `.catch`，原写法会在激活时抛 TypeError）。
+  - `activityRegistry.register(...)` → `activityRegistry.registerProvider(defineActivityProvider({ descriptor, onInitialize, onStart, onPause, onResume, onFinish, onDispose }))`。新 API 钩子前缀由 `initialize/start/pause/resume/finish/dispose` 改为 `on*`，且方法名变更为 `registerProvider`。
+  - `pointsLedger.addPoints(...)` 第二参数官方命名为 `classId`；本插件继续以 `activity_id` 作为写入键（不增加 classId 解析失败面），并在调用处加注释说明。
+- **平台最低版本要求**：`engines.openlearn` 与 README 前置条件从 `>= 0.1.0` 收紧至 `>= 0.1.12`（三个新 Token 均为 0.1.12 引入）。
+
+---
+
 ## [1.2.2] - 2026-07-26
 
 ### Changed

@@ -12,6 +12,7 @@ import {
   IPointsDimensionRegistryToken,
   IProcessServiceToken,
   IActivityRegistryToken,
+  defineActivityProvider,
 } from '@openlearn/plugin-sdk';
 import { WorkflowStateMachine } from './domain/workflow-state-machine.js';
 import type {
@@ -31,7 +32,7 @@ export default {
     author: 'OpenLearn Next',
     repository: 'https://github.com/openlearn-next/lianyun-course',
     homepage: 'https://github.com/openlearn-next/lianyun-course',
-    engines: { openlearn: '>= 0.1.0' },
+    engines: { openlearn: '>= 0.1.12' },
     requires: [
       '@openlearn/core:ICommandBusService@^1.0.0',
       '@openlearn/core:IEventBusService@^1.0.0',
@@ -152,42 +153,45 @@ export default {
         activityRegistry = await resolveWithTimeout(IActivityRegistryToken);
 
         if (pointsDimensionRegistry?.registerDimension) {
-          await pointsDimensionRegistry.registerDimension({
-            id: 'research_collaboration',
-            name: '课题协作',
-            description: '研究性学习项目中的小组团队协作贡献得分',
-            category: 'collaboration',
-            provider: 'lianyun-course',
-          }).catch(() => {});
-          await pointsDimensionRegistry.registerDimension({
-            id: 'research_innovation',
-            name: '探究创新',
-            description: '课题成果中的创新性与探究深度得分',
-            category: 'engagement',
-            provider: 'lianyun-course',
-          }).catch(() => {});
+          try {
+            pointsDimensionRegistry.registerDimension({
+              id: 'research_collaboration',
+              name: '课题协作',
+              description: '研究性学习项目中的小组团队协作贡献得分',
+              category: 'collaboration',
+              provider: 'lianyun-course',
+            });
+            pointsDimensionRegistry.registerDimension({
+              id: 'research_innovation',
+              name: '探究创新',
+              description: '课题成果中的创新性与探究深度得分',
+              category: 'engagement',
+              provider: 'lianyun-course',
+            });
+          } catch { /* 维度注册失败不影响插件激活 */ }
         }
 
-        if (activityRegistry?.register) {
-          activityRegistry.register({
-            descriptor: {
-              id: 'ext-research-workflow:activity',
-              name: '研究性探究课题',
-              description: '阶段式项目研究与成果盲审活动',
-              category: 'collaboration',
-              version: '1.1.0',
-              provider: 'lianyun-course',
-              supportedRoles: ['teacher', 'student'],
-              commandType: 'research.create_activity',
-            },
-            state: 'registered',
-            async initialize() {},
-            async start() {},
-            async pause() {},
-            async resume() {},
-            async finish() {},
-            async dispose() {},
-          });
+        if (activityRegistry?.registerProvider) {
+          activityRegistry.registerProvider(
+            defineActivityProvider({
+              descriptor: {
+                id: 'ext-research-workflow:activity',
+                name: '研究性探究课题',
+                description: '阶段式项目研究与成果盲审活动',
+                category: 'collaboration',
+                version: '1.1.0',
+                provider: 'lianyun-course',
+                supportedRoles: ['teacher', 'student'],
+                commandType: 'research.create_activity',
+              },
+              onInitialize: async () => {},
+              onStart: async () => {},
+              onPause: async () => {},
+              onResume: async () => {},
+              onFinish: async () => {},
+              onDispose: async () => {},
+            }),
+          );
         }
       } catch (e) {}
     };
@@ -504,6 +508,10 @@ export default {
               const subRow = rawDb.prepare('SELECT * FROM plugin_research_submissions WHERE id = ?').get(submissionId);
               if (subRow?.student_id && pointsLedger?.addPoints) {
                 try {
+                  // 第 2 参数 SDK 签名为 classId；此处复用 activity_id 作为
+                  // 「研究性课题班」维度的写入键，避免额外查询 classId 增加
+                  // 失败面。若未来需要严格按真实班级维度结算，应改为从
+                  // command.payload.classId 读取。
                   await pointsLedger.addPoints(
                     subRow.student_id,
                     subRow.activity_id || 'research_class',

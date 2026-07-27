@@ -17,14 +17,14 @@
 
 ### 前置条件
 
-- OpenLearn Next >= 0.1.0
+- OpenLearn Next >= 0.1.12（插件依赖 `IPointsLedgerService` / `IPointsDimensionRegistry` / `IActivityRegistry` 三个 DI 服务，均在 0.1.12 引入）
 - Node.js >= 18
 - pnpm（推荐）或 npm
 
 ### 构建
 
 ```bash
-cd v2_plugins/research-workflow
+cd lianyun-course   # 克隆后的仓库根目录
 npm install
 npx openlearn-plugin-sdk build
 ```
