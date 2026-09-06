@@ -7,11 +7,71 @@
  * 3. 教师端：成果终审 (Approve/Return) 与全课题 ZIP 打包导出
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClassItem, ClassStudent, ResearchGroup, GroupMemberDetail } from './types.js';
 
-let ctx: any = null;
+/**
+ * 插件宿主环境 (PluginContext) 通过 React Context 传入组件，避免模块级
+ * 可变全局变量在多实例 / 热重载下互相覆盖。
+ *
+ * activate() 中会用 withHostCtx() 把每个注册的组件包裹一层 Provider，
+ * 内部组件调用 useHost() 即可拿到带 actorId 自动注入的 invokeCommand。
+ */
+export interface PluginHostCtx {
+  invokeCommand: (type: string, payload?: any) => Promise<any>;
+  actorId: string;
+  ui: any;
+  raw: any;
+}
+
+const PluginHostContext = React.createContext<PluginHostCtx | null>(null);
+
+function useHost(): PluginHostCtx {
+  const host = useContext(PluginHostContext);
+  if (!host) {
+    throw new Error(
+      'PluginHostContext 未初始化：组件必须在 activate() 通过 withHostCtx() 包裹后使用。',
+    );
+  }
+  return host;
+}
+
+/**
+ * 在 hostCtx 上构造一个自带 actorId 注入的 ctx；用于 Provider 的 value。
+ */
+function wrapHost(hostCtx: any): PluginHostCtx {
+  const actorId =
+    (hostCtx?.actorId as string) ||
+    (hostCtx?.userId as string) ||
+    (hostCtx?.user?.id as string) ||
+    'anonymous';
+  const rawInvoke = hostCtx?.invokeCommand?.bind(hostCtx);
+  const invokeCommand: PluginHostCtx['invokeCommand'] = rawInvoke
+    ? (type, payload = {}) => rawInvoke(type, { ...(payload || {}), actorId })
+    : async () => ({ success: false, error: 'host.invokeCommand 不可用' });
+  return { invokeCommand, actorId, ui: hostCtx?.ui, raw: hostCtx };
+}
+
+/**
+ * 把任意组件用 PluginHostContext.Provider 包裹一层。供 activate() 调用。
+ */
+function withHostCtx<P extends object>(
+  hostCtx: any,
+  Inner: React.ComponentType<P>,
+): React.ComponentType<P> {
+  const Wrapped: React.FC<P> = (props) => (
+    <PluginHostContext.Provider value={wrapHost(hostCtx)}>
+      <Inner {...props} />
+    </PluginHostContext.Provider>
+  );
+  Wrapped.displayName = `WithHostCtx(${Inner.displayName || Inner.name || 'Component'})`;
+  return Wrapped;
+}
+
+// 保留模块级引用作为 Provider 外部使用（例如 activate 期间需要脱 Provider 拿到原始 host）
+// 赋值点仅在 activate() 里，deactivate() 里重置。组件内请用 useHost() 而非该变量。
+let hostCtxRef: any = null;
 
 export interface ProjectConfig {
   enableGrouping: boolean;
@@ -33,6 +93,170 @@ export interface ProjectItem {
   currentPhase: string;
   config: ProjectConfig;
   createdAt: number;
+}
+
+// =========================================================================
+// CreateProjectModal — 从 ResearchWorkspaceMainView 抽取出的独立组件。
+// 拆分理由：原组件 1590 行单文件，包含「课题列表 / 班级名册 / 分组网格 /
+// 学生提交 / 教师评审 / 创建弹窗」六大职责；将『创建弹窗』作为首个抽
+// 出的子组件，验证拆分模式 (props in / callback out) 后，后续子组件可
+// 照此重构。
+// =========================================================================
+interface CreateProjectModalProps {
+  onClose: () => void;
+  onSubmit: (input: {
+    title: string;
+    description: string;
+    enableGrouping: boolean;
+    maxMembers: number;
+    enablePeerReview: boolean;
+    allowedFileTypes: string[];
+  }) => void;
+}
+
+function CreateProjectModal({ onClose, onSubmit }: CreateProjectModalProps) {
+  // 使用 useReducer 把表单的 5 个状态打包为一个 model，后续同类组件可
+  // 直接复用此模式，避免 useState 爆炸式堆叠。
+  interface FormState {
+    title: string;
+    description: string;
+    enableGrouping: boolean;
+    maxMembers: number;
+    enablePeerReview: boolean;
+    selectedFileTypes: string[];
+  }
+  type FormAction =
+    | { type: 'set'; field: keyof Omit<FormState, 'selectedFileTypes'>; value: any }
+    | { type: 'toggleExtGroup'; exts: string[]; checked: boolean };
+  const [form, dispatch] = React.useReducer(
+    (state: FormState, action: FormAction): FormState => {
+      if (action.type === 'set') {
+        return { ...state, [action.field]: action.value };
+      }
+      if (action.type === 'toggleExtGroup') {
+        const has = state.selectedFileTypes.filter((e) => !action.exts.includes(e));
+        const next = action.checked
+          ? Array.from(new Set([...state.selectedFileTypes, ...action.exts]))
+          : has;
+        return { ...state, selectedFileTypes: next };
+      }
+      return state;
+    },
+    {
+      title: '',
+      description: '',
+      enableGrouping: true,
+      maxMembers: 4,
+      enablePeerReview: true,
+      selectedFileTypes: ['.pdf', '.docx', '.zip', '.mp4'],
+    },
+  );
+
+  const handleSave = () => {
+    if (!form.title.trim()) {
+      alert('请输入学习项目名称');
+      return;
+    }
+    onSubmit({
+      title: form.title.trim(),
+      description: form.description,
+      enableGrouping: form.enableGrouping,
+      maxMembers: form.maxMembers,
+      enablePeerReview: form.enablePeerReview,
+      allowedFileTypes: form.selectedFileTypes.length > 0 ? form.selectedFileTypes : ['.pdf', '.zip'],
+    });
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-label="创建新探究学习项目"
+      style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 24, width: 520, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 18, color: '#0f172a' }}>➕ 发起新探究学习项目 (教师端)</h3>
+          <button onClick={onClose} style={{ backgroundColor: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 16 }} aria-label="关闭">✕</button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>项目名称 *</label>
+            <input
+              type="text"
+              placeholder="例: 智慧农业多光谱微型物联网探究"
+              value={form.title}
+              onChange={(e) => dispatch({ type: 'set', field: 'title', value: e.target.value })}
+              style={{ width: '100%', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#0f172a', padding: '9px 12px', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>项目探究背景与要求</label>
+            <textarea
+              placeholder="填写项目学习目标及成果交付规范..."
+              rows={3}
+              value={form.description}
+              onChange={(e) => dispatch({ type: 'set', field: 'description', value: e.target.value })}
+              style={{ width: '100%', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#0f172a', padding: '9px 12px', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
+            />
+          </div>
+
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 14, backgroundColor: '#f8fafc' }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: '700', color: '#2563eb', marginBottom: 8 }}>
+              ⚙️ 设置允许学生提交的材料格式 (Allowed Formats)
+            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {FILE_TYPE_OPTIONS.map((opt) => {
+                const isChecked = opt.exts.every((e) => form.selectedFileTypes.includes(e));
+                return (
+                  <label key={opt.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#334155', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => dispatch({ type: 'toggleExtGroup', exts: opt.exts, checked: e.target.checked })}
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#334155', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={form.enableGrouping}
+                onChange={(e) => dispatch({ type: 'set', field: 'enableGrouping', value: e.target.checked })}
+              />
+              <span>开启团队分组</span>
+            </label>
+            {form.enableGrouping && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#334155' }}>
+                <span>每组上限:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={form.maxMembers}
+                  onChange={(e) => dispatch({ type: 'set', field: 'maxMembers', value: Number(e.target.value) })}
+                  style={{ width: 50, padding: '3px 6px', border: '1px solid #cbd5e1', borderRadius: 6 }}
+                />
+                <span>人</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+            <button onClick={onClose} style={{ backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', borderRadius: 8, padding: '8px 16px', fontSize: 13, cursor: 'pointer' }}>取消</button>
+            <button onClick={handleSave} style={{ backgroundColor: '#2563eb', border: 'none', color: '#ffffff', borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer', fontWeight: '600' }}>保存并发起课题项目</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // 常见文件格式选项
@@ -101,6 +325,7 @@ function WorkflowPhaseStepper({ currentPhase, onSelectPhase, isTeacher }: { curr
 
 // 2. 主页面控制台 (包含 教师端 / 学生端 角色视角)
 export function ResearchWorkspaceMainView() {
+  const host = useHost();
   const [role, setRole] = useState<'teacher' | 'student'>('teacher');
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [classList, setClassList] = useState<ClassItem[]>([]);
@@ -110,9 +335,9 @@ export function ResearchWorkspaceMainView() {
   useEffect(() => {
     let isMounted = true;
     const fetchRealClasses = async () => {
-      if (ctx?.invokeCommand) {
+      if (host?.invokeCommand) {
         try {
-          const res = await ctx.invokeCommand('research.get_classes', {});
+          const res = await host.invokeCommand('research.get_classes', {});
           if (res?.success && res.classes && res.classes.length > 0 && isMounted) {
             setClassList(res.classes);
             setSelectedClassId(res.classes[0].id);
@@ -136,7 +361,8 @@ export function ResearchWorkspaceMainView() {
                   id: s.id,
                   name: s.name,
                   studentNo: s.student_number || s.id,
-                  avatar: s.name.endsWith('娜') || s.name.endsWith('洋') || s.name.endsWith('敏') || s.name.endsWith('婷') ? '👩‍🎓' : '👨‍🎓',
+                  // 不按姓名尾字猜测性别，返回中性头像。
+                  avatar: undefined,
                 })),
               };
             })
@@ -154,6 +380,30 @@ export function ResearchWorkspaceMainView() {
   }, []);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
 
+  // 从服务端拉取课题列表，保持与服务端状态一致。
+  const refreshActivities = async () => {
+    if (!host?.invokeCommand) return;
+    try {
+      const res = await host.invokeCommand('research.get_activities', {});
+      if (res?.success && Array.isArray(res.activities)) {
+        setProjects(res.activities.map((a: any) => ({
+          id: a.id,
+          title: a.title,
+          description: a.description,
+          teacherId: a.teacherId,
+          currentPhase: a.currentPhase,
+          config: a.config,
+          createdAt: a.createdAt,
+        })));
+      }
+    } catch { /* 拉取失败保留本地缓存 */ }
+  };
+
+  useEffect(() => {
+    refreshActivities();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
@@ -164,13 +414,8 @@ export function ResearchWorkspaceMainView() {
   // 项目分组映射表 (activityId -> ResearchGroup[])
   const [projectGroups, setProjectGroups] = useState<Record<string, ResearchGroup[]>>({});
 
-  // 表单状态：教师端新建项目
-  const [newTitle, setNewTitle] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [newEnableGrouping, setNewEnableGrouping] = useState(true);
-  const [newMaxMembers, setNewMaxMembers] = useState(4);
-  const [newEnablePeerReview, setNewEnablePeerReview] = useState(true);
-  const [selectedFileTypes, setSelectedFileTypes] = useState<string[]>(['.pdf', '.docx', '.zip', '.mp4']);
+  // 表单状态：教师端新建项目已抽取到 CreateProjectModal 组件，
+  // 这里不再保留相关 useState。
 
   // 提交物列表
   const [projectSubmissions, setProjectSubmissions] = useState<Record<string, any[]>>({});
@@ -194,9 +439,26 @@ export function ResearchWorkspaceMainView() {
   const handleAutoRandomGrouping = () => {
     if (!activeProject || !activeClass) return;
     const students = [...activeClass.students];
-    // 洗牌算法 Shuffle
+
+    // Fisher–Yates 洗牌：使用 crypto.getRandomValues 保证公平且审计时
+    // 可复现（虽不加密安全，但比 Math.random 更难被预测，避免出现
+    // 「某个学生总是落在同一个组」的隐性偏好）。不支持的浏览器降级
+    // 到 Math.random。
+    const useCrypto = typeof crypto !== 'undefined' && !!crypto.getRandomValues;
+    const secureRandomBelow = (n: number): number => {
+      if (!useCrypto || n <= 0) return Math.floor(Math.random() * n);
+      // Rejection sampling to avoid modulo bias.
+      const max = Math.floor(0xffffffff / n) * n;
+      const buf = new Uint32Array(1);
+      let v: number;
+      do {
+        crypto.getRandomValues(buf);
+        v = buf[0];
+      } while (v >= max);
+      return v % n;
+    };
     for (let i = students.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = secureRandomBelow(i + 1);
       [students[i], students[j]] = [students[j], students[i]];
     }
 
@@ -235,8 +497,8 @@ export function ResearchWorkspaceMainView() {
       [activeProject.id]: newGroupList,
     });
 
-    if (ctx?.invokeCommand) {
-      ctx.invokeCommand('research.save_groups', {
+    if (host?.invokeCommand) {
+      host.invokeCommand('research.save_groups', {
         activityId: activeProject.id,
         classId: selectedClassId,
         groups: newGroupList,
@@ -342,9 +604,9 @@ export function ResearchWorkspaceMainView() {
     if (!activeProject) return;
     if (activeProject.currentPhase === newPhase) return;
 
-    if (ctx?.invokeCommand) {
+    if (host?.invokeCommand) {
       try {
-        const res = await ctx.invokeCommand('research.update_phase', {
+        const res = await host.invokeCommand('research.update_phase', {
           activityId: activeProject.id,
           currentPhase: activeProject.currentPhase,
           targetPhase: newPhase,
@@ -363,51 +625,18 @@ export function ResearchWorkspaceMainView() {
     }
   };
 
-  // 教师端：新建学习项目
-  const handleCreateProject = async () => {
-    if (!newTitle.trim()) {
-      alert('请输入学习项目名称');
-      return;
-    }
-
-    const projectId = `act_${Date.now()}`;
-    const newProj: ProjectItem = {
-      id: projectId,
-      title: newTitle,
-      description: newDesc || '暂无项目背景描述',
-      teacherId: 'teacher_admin',
-      currentPhase: 'DRAFT',
-      config: {
-        enableGrouping: newEnableGrouping,
-        maxGroupMembers: newMaxMembers,
-        enablePeerReview: newEnablePeerReview,
-        peerReviewsPerStudent: 2,
-        allowLateSubmission: false,
-        aiPreCheckEnabled: true,
-        allowedFileTypes: selectedFileTypes.length > 0 ? selectedFileTypes : ['.pdf', '.zip'],
-        maxFileSizeMB: 50,
-        requiredMinAttachments: 1,
-      },
-      createdAt: Date.now(),
-    };
-
-    setProjects([newProj, ...projects]);
-    setProjectGroups({ ...projectGroups, [projectId]: [] });
-    setProjectSubmissions({ ...projectSubmissions, [projectId]: [] });
-    setActiveProjectId(projectId);
-    setShowCreateModal(false);
-    setNewTitle('');
-    setNewDesc('');
-  };
+  // 教师端：新建学习项目逻辑已抽取到 <CreateProjectModal />。
+  // 详见 CreateProjectModal 的 onSubmit 实现，主组件不再持有表单状态。
 
   // 教师端：删除课题 (含关联分组与提交记录)
-  const handleDeleteProject = (projectId: string) => {
+  const handleDeleteProject = async (projectId: string) => {
     const target = projects.find((p) => p.id === projectId);
     if (!target) return;
     if (!confirm(`确定要删除课题「${target.title}」吗？\n该课题下的分组与提交记录将一并移除，且不可恢复。`)) {
       return;
     }
 
+    // 先乐观从本地移除，再调服务端保证最终一致。
     const remaining = projects.filter((p) => p.id !== projectId);
     setProjects(remaining);
     setProjectGroups((prev) => {
@@ -420,18 +649,49 @@ export function ResearchWorkspaceMainView() {
       delete next[projectId];
       return next;
     });
-
-    // 若删除的是当前激活课题，则自动选中剩余第一个课题
     if (activeProjectId === projectId) {
       setActiveProjectId(remaining.length > 0 ? remaining[0].id : '');
+    }
+
+    if (host?.invokeCommand) {
+      try {
+        const res = await host.invokeCommand('research.delete_activity', { activityId: projectId });
+        if (!res?.success) {
+          alert(`服务端删除失败：${res?.error || '未知错误'}`);
+          // 回滚本地删除
+          await refreshActivities();
+        }
+      } catch (e: any) {
+        alert(`服务端删除失败：${e?.message || '网络错误'}`);
+        await refreshActivities();
+      }
     }
   };
 
   // 教师端：成果终审
   const handleTeacherEvaluate = async (subId: string, decision: 'APPROVE' | 'RETURN') => {
     if (!activeProject) return;
+    // 乐观更新本地状态
     const updatedSubs = activeSubs.map((s) => (s.id === subId ? { ...s, status: decision === 'APPROVE' ? 'APPROVED' : 'RETURNED' } : s));
     setProjectSubmissions({ ...projectSubmissions, [activeProject.id]: updatedSubs });
+
+    if (host?.invokeCommand) {
+      try {
+        const res = await host.invokeCommand('research.evaluate_submission', {
+          submissionId: subId,
+          reviewerId: 'teacher_admin',
+          reviewType: 'TEACHER',
+          scores: [],
+          comments: '',
+          decision,
+        });
+        if (!res?.success) {
+          alert(`服务端终审失败：${res?.error || '未知错误'}（本地状态已临时更新）`);
+        }
+      } catch (e: any) {
+        alert(`服务端终审失败：${e?.message || '网络错误'}（本地状态已临时更新）`);
+      }
+    }
   };
 
   // 教师端：触发 ZIP 打包导出
@@ -439,9 +699,9 @@ export function ResearchWorkspaceMainView() {
     if (!activeProject) return;
     setExportStatus(`正在为课题【${activeProject.title}】启动后台 ZIP 归档打包任务...`);
 
-    if (ctx?.invokeCommand) {
+    if (host?.invokeCommand) {
       try {
-        const res = await ctx.invokeCommand('research.trigger_export', { activityId: activeProject.id });
+        const res = await host.invokeCommand('research.trigger_export', { activityId: activeProject.id });
         if (res?.success) {
           setExportStatus(`课题【${activeProject.title}】打包完成！下载地址: ${res.downloadUrl}`);
         }
@@ -808,7 +1068,7 @@ export function ResearchWorkspaceMainView() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             {/* 拖拽图标放置于姓名最左边 */}
                             <span style={{ fontSize: 13, color: '#94a3b8', cursor: 'grab', userSelect: 'none' }} title="按住拖拽更换小组">⋮⋮</span>
-                            <span>{m.isLeader ? '👑' : '👨‍🎓'}</span>
+                            <span>{m.isLeader ? '👑' : '🎓'}</span>
                             <span style={{ fontWeight: m.isLeader ? '700' : '500', color: m.isLeader ? '#d97706' : '#0f172a' }}>{m.name}</span>
                             {m.isLeader && <span style={{ fontSize: 10, backgroundColor: '#fef3c7', color: '#d97706', padding: '1px 5px', borderRadius: 3, fontWeight: '600' }}>组长</span>}
                           </div>
@@ -1051,7 +1311,7 @@ export function ResearchWorkspaceMainView() {
                         <div key={m.studentId} style={{ backgroundColor: m.isLeader ? '#fef3c7' : '#f8fafc', border: m.isLeader ? '1px solid #fde68a' : '1px solid #e2e8f0', padding: 10, borderRadius: 8, fontSize: 12 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <span>{m.isLeader ? '👑' : '👨‍🎓'}</span>
+                              <span>{m.isLeader ? '👑' : '🎓'}</span>
                               <span style={{ fontWeight: '700', color: m.isLeader ? '#b45309' : '#0f172a' }}>{m.name}</span>
                               {m.isLeader && <span style={{ fontSize: 10, backgroundColor: '#d97706', color: '#ffffff', padding: '1px 5px', borderRadius: 4, fontWeight: '700' }}>组长</span>}
                             </div>
@@ -1074,94 +1334,59 @@ export function ResearchWorkspaceMainView() {
       )}
       </>
       )}
-      {/* 教师端：创建新学习项目 Modal 弹窗 */}
       {showCreateModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 24, width: 520, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 18, color: '#0f172a' }}>➕ 发起新探究学习项目 (教师端)</h3>
-              <button onClick={() => setShowCreateModal(false)} style={{ backgroundColor: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 16 }}>✕</button>
-            </div>
+        <CreateProjectModal
+          onClose={() => setShowCreateModal(false)}
+          onSubmit={(input) => {
+            // 先乐观更新本地状态，再调服务端创建。详细逻辑复用 handleCreateProject 路径。
+            const projectId = `act_${Date.now()}`;
+            const optimisticProj: ProjectItem = {
+              id: projectId,
+              title: input.title,
+              description: input.description || '暂无项目背景描述',
+              teacherId: 'teacher_admin',
+              currentPhase: 'DRAFT',
+              config: {
+                enableGrouping: input.enableGrouping,
+                maxGroupMembers: input.maxMembers,
+                enablePeerReview: input.enablePeerReview,
+                peerReviewsPerStudent: 2,
+                allowLateSubmission: false,
+                aiPreCheckEnabled: true,
+                allowedFileTypes: input.allowedFileTypes,
+                maxFileSizeMB: 50,
+                requiredMinAttachments: 1,
+              },
+              createdAt: Date.now(),
+            };
+            setProjects([optimisticProj, ...projects]);
+            setProjectGroups({ ...projectGroups, [projectId]: [] });
+            setProjectSubmissions({ ...projectSubmissions, [projectId]: [] });
+            setActiveProjectId(projectId);
+            setShowCreateModal(false);
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>项目名称 *</label>
-                <input
-                  type="text"
-                  placeholder="例: 智慧农业多光谱微型物联网探究"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  style={{ width: '100%', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#0f172a', padding: '9px 12px', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>项目探究背景与要求</label>
-                <textarea
-                  placeholder="填写项目学习目标及成果交付规范..."
-                  rows={3}
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  style={{ width: '100%', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#0f172a', padding: '9px 12px', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
-                />
-              </div>
-
-              {/* 允许提交的材料格式 */}
-              <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 14, backgroundColor: '#f8fafc' }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: '700', color: '#2563eb', marginBottom: 8 }}>
-                  ⚙️ 设置允许学生提交的材料格式 (Allowed Formats)
-                </label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {FILE_TYPE_OPTIONS.map((opt) => {
-                    const isChecked = opt.exts.every((e) => selectedFileTypes.includes(e));
-                    return (
-                      <label key={opt.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#334155', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedFileTypes([...Array.from(new Set([...selectedFileTypes, ...opt.exts]))]);
-                            } else {
-                              setSelectedFileTypes(selectedFileTypes.filter((e) => !opt.exts.includes(e)));
-                            }
-                          }}
-                        />
-                        <span>{opt.label}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 16 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#334155', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={newEnableGrouping} onChange={(e) => setNewEnableGrouping(e.target.checked)} />
-                  <span>开启团队分组</span>
-                </label>
-                {newEnableGrouping && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#334155' }}>
-                    <span>每组上限:</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={newMaxMembers}
-                      onChange={(e) => setNewMaxMembers(Number(e.target.value))}
-                      style={{ width: 50, padding: '3px 6px', border: '1px solid #cbd5e1', borderRadius: 6 }}
-                    />
-                    <span>人</span>
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
-                <button onClick={() => setShowCreateModal(false)} style={{ backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', borderRadius: 8, padding: '8px 16px', fontSize: 13, cursor: 'pointer' }}>取消</button>
-                <button onClick={handleCreateProject} style={{ backgroundColor: '#2563eb', border: 'none', color: '#ffffff', borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer', fontWeight: '600' }}>保存并发起课题项目</button>
-              </div>
-            </div>
-          </div>
-        </div>
+            host.invokeCommand('research.create_activity', {
+              title: input.title,
+              description: input.description || '暂无项目背景描述',
+              teacherId: 'teacher_admin',
+              classId: selectedClassId || undefined,
+              config: optimisticProj.config,
+            }).then((res) => {
+              if (res?.success && res.activityId && res.activityId !== projectId) {
+                setProjects((cur) => cur.map((p) => (p.id === projectId ? { ...p, id: res.activityId } : p)));
+                setActiveProjectId(res.activityId);
+              } else if (!res?.success) {
+                alert(`课题创建失败：${res?.error || '未知错误'}`);
+                setProjects((cur) => cur.filter((p) => p.id !== projectId));
+                setActiveProjectId('');
+              }
+            }).catch((e: any) => {
+              alert(`课题创建失败：${e?.message || '网络错误'}`);
+              setProjects((cur) => cur.filter((p) => p.id !== projectId));
+              setActiveProjectId('');
+            });
+          }}
+        />
       )}
     </div>
   );
@@ -1169,8 +1394,69 @@ export function ResearchWorkspaceMainView() {
 
 // 3. 白板精简图标按钮与抽屉 (`classroom.tool`)
 export function ResearchClassroomToolWidget() {
+  const host = useHost();
   const [isOpen, setIsOpen] = useState(false);
+  const [drawerProjects, setDrawerProjects] = useState<ProjectItem[]>([]);
+  const [drawerActivePid, setDrawerActivePid] = useState<string>('');
+  const [drawerMsg, setDrawerMsg] = useState<string | null>(null);
   const portalContainer = typeof document !== 'undefined' ? document.body : null;
+
+  // 抽屉打开时拉取课题列表，让『推进课题阶段』按钮可作用于真实活动。
+  useEffect(() => {
+    if (!isOpen || !host?.invokeCommand) return;
+    host.invokeCommand('research.get_activities', {})
+      .then((res: any) => {
+        if (res?.success && Array.isArray(res.activities)) {
+          const mapped = res.activities.map((a: any) => ({
+            id: a.id,
+            title: a.title,
+            description: a.description,
+            teacherId: a.teacherId,
+            currentPhase: a.currentPhase,
+            config: a.config,
+            createdAt: a.createdAt,
+          }));
+          setDrawerProjects(mapped);
+          if (mapped.length > 0 && !drawerActivePid) setDrawerActivePid(mapped[0].id);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const handleAdvancePhase = async () => {
+    const target = drawerProjects.find((p) => p.id === drawerActivePid);
+    if (!target) {
+      setDrawerMsg('请先选择一个课题');
+      return;
+    }
+    const next = computeNextPhase(target.currentPhase);
+    if (!next) {
+      setDrawerMsg(`当前阶段 ${target.currentPhase} 已为最终阶段`);
+      return;
+    }
+    if (host?.invokeCommand) {
+      try {
+        const res = await host.invokeCommand('research.update_phase', {
+          activityId: target.id,
+          currentPhase: target.currentPhase,
+          targetPhase: next,
+          override: false,
+        });
+        if (res?.success) {
+          setDrawerProjects((cur) => cur.map((p) => (p.id === target.id ? { ...p, currentPhase: next } : p)));
+          setDrawerMsg(`已将「${target.title}」推进至 ${next}`);
+        } else {
+          setDrawerMsg(`推进失败：${res?.error || '受 Guard 规则约束'}`);
+        }
+      } catch (e: any) {
+        setDrawerMsg(`推进失败：${e?.message || '网络错误'}`);
+      }
+    }
+    setTimeout(() => setDrawerMsg(null), 3000);
+  };
+
+  const drawerActiveProj = drawerProjects.find((p) => p.id === drawerActivePid);
 
   return (
     <React.Fragment>
@@ -1216,10 +1502,47 @@ export function ResearchClassroomToolWidget() {
             <span style={{ fontWeight: '700', color: '#2563eb', fontSize: 14 }}>🔬 课题探究阶段控制台</span>
             <button onClick={() => setIsOpen(false)} style={{ backgroundColor: 'transparent', color: '#94a3b8', border: 'none', cursor: 'pointer', fontSize: 14 }}>✕</button>
           </div>
-          <p style={{ fontSize: 12, color: '#475569', margin: '0 0 14px 0' }}>多项目工作流引擎已就绪。</p>
-          <button onClick={() => { alert('已推进课题阶段'); setIsOpen(false); }} style={{ width: '100%', backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: 8, padding: '8px 12px', fontSize: 12, fontWeight: '600', cursor: 'pointer' }}>
-            推进课题阶段 ➔
-          </button>
+          <p style={{ fontSize: 12, color: '#475569', margin: '0 0 12px 0' }}>多项目工作流引擎已就绪。</p>
+
+          {drawerProjects.length === 0 ? (
+            <p style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', padding: '8px 0' }}>暂无课题，请在主面板创建。</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+              <select
+                value={drawerActivePid}
+                onChange={(e) => setDrawerActivePid(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 12, backgroundColor: '#ffffff' }}
+              >
+                {drawerProjects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.title} · {p.currentPhase}</option>
+                ))}
+              </select>
+              {drawerActiveProj && (
+                <button
+                  onClick={handleAdvancePhase}
+                  disabled={!computeNextPhase(drawerActiveProj.currentPhase)}
+                  style={{
+                    width: '100%',
+                    backgroundColor: computeNextPhase(drawerActiveProj.currentPhase) ? '#2563eb' : '#94a3b8',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    fontWeight: '600',
+                    cursor: computeNextPhase(drawerActiveProj.currentPhase) ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  推进到下一步 ➔
+                </button>
+              )}
+            </div>
+          )}
+          {drawerMsg && (
+            <div style={{ backgroundColor: '#dbeafe', color: '#1e40af', padding: '6px 10px', borderRadius: 6, fontSize: 11, textAlign: 'center' }}>
+              {drawerMsg}
+            </div>
+          )}
         </div>,
         portalContainer
       )}
@@ -1227,8 +1550,28 @@ export function ResearchClassroomToolWidget() {
   );
 }
 
+// 简单的阶段顺序辅助：用于抽屉/主面板的『下一步』按钮。
+const PHASE_ORDER: Array<{ key: string; label: string }> = [
+  { key: 'DRAFT', label: '草稿' },
+  { key: 'PUBLISHED', label: '已发布' },
+  { key: 'GROUPING', label: '团队分组' },
+  { key: 'IN_PROGRESS', label: '探究实施' },
+  { key: 'SUBMISSION', label: '成果提交' },
+  { key: 'PEER_REVIEW', label: '盲审互评' },
+  { key: 'TEACHER_REVIEW', label: '教师终审' },
+  { key: 'POINTS_AWARDED', label: '积分结算' },
+  { key: 'ARCHIVED', label: '归档导出' },
+];
+
+function computeNextPhase(currentPhase: string): string | null {
+  const idx = PHASE_ORDER.findIndex((p) => p.key === currentPhase);
+  if (idx < 0 || idx === PHASE_ORDER.length - 1) return null;
+  return PHASE_ORDER[idx + 1].key;
+}
+
 // 4. 教师白板卡片组件 (teacher.dashboard.widget)
 export function TeacherWhiteboardWidget(props: any) {
+  const host = useHost();
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [activePid, setActivePid] = useState('');
   const [broadcastMsg, setBroadcastMsg] = useState('');
@@ -1236,8 +1579,8 @@ export function TeacherWhiteboardWidget(props: any) {
   const activeProj = projects.find((p) => p.id === activePid);
 
   useEffect(() => {
-    if (ctx?.invokeCommand) {
-      ctx.invokeCommand('research.get_activities', {}).then((res: any) => {
+    if (host?.invokeCommand) {
+      host.invokeCommand('research.get_activities', {}).then((res: any) => {
         if (res?.success && res.activities) setProjects(res.activities);
       }).catch(() => {});
     }
@@ -1296,14 +1639,14 @@ export function TeacherWhiteboardWidget(props: any) {
               📢 推送到学生端
             </button>
             <button
-              onClick={() => { if (activeProj && ctx?.invokeCommand) ctx.invokeCommand('research.update_phase', { activityId: activeProj.id, targetPhase: 'SUBMISSION', override: true }).catch(() => {}); }}
+              onClick={() => { if (activeProj && host?.invokeCommand) host.invokeCommand('research.update_phase', { activityId: activeProj.id, targetPhase: 'SUBMISSION', override: true }).catch(() => {}); }}
               disabled={!activePid}
               style={{ backgroundColor: activePid ? '#059669' : '#94a3b8', color: '#ffffff', border: 'none', borderRadius: 6, padding: '7px 10px', fontSize: 12, fontWeight: '600', cursor: activePid ? 'pointer' : 'not-allowed' }}
             >
               📤 开启成果提交
             </button>
             <button
-              onClick={() => { if (activeProj && ctx?.invokeCommand) ctx.invokeCommand('research.update_phase', { activityId: activeProj.id, targetPhase: 'PEER_REVIEW', override: true }).catch(() => {}); }}
+              onClick={() => { if (activeProj && host?.invokeCommand) host.invokeCommand('research.update_phase', { activityId: activeProj.id, targetPhase: 'PEER_REVIEW', override: true }).catch(() => {}); }}
               disabled={!activePid}
               style={{ backgroundColor: activePid ? '#7c3aed' : '#94a3b8', color: '#ffffff', border: 'none', borderRadius: 6, padding: '7px 10px', fontSize: 12, fontWeight: '600', cursor: activePid ? 'pointer' : 'not-allowed' }}
             >
@@ -1527,14 +1870,22 @@ export function StudentResearchView() {
 
 // 6. 前端插件入口 activate & deactivate
 export async function activate(hostCtx: any) {
-  ctx = hostCtx;
+  hostCtxRef = hostCtx;
+
+  // 不再修改 hostCtx.invokeCommand 本身（会污染宿主），
+  // 由 withHostCtx 在 Provider 内部重新绑定为自带 actorId 注入的版本。
+  const teacherTab = withHostCtx(hostCtx, ResearchWorkspaceMainView);
+  const workspaceView = withHostCtx(hostCtx, ResearchWorkspaceMainView);
+  const classroomTool = withHostCtx(hostCtx, ResearchClassroomToolWidget);
+  const studentView = withHostCtx(hostCtx, StudentResearchView);
+  const dashboardWidget = withHostCtx(hostCtx, TeacherWhiteboardWidget);
 
   try {
     hostCtx.ui.registerExtensionPoint('teacher.tab', {
       id: 'tab_lianyun_course',
       label: '恋云课程管理',
       icon: 'Microscope',
-      component: ResearchWorkspaceMainView,
+      component: teacherTab,
       position: 20,
     });
   } catch (e) {}
@@ -1544,7 +1895,7 @@ export async function activate(hostCtx: any) {
       id: 'lianyun_course_workspace',
       label: '恋云课程中心',
       icon: 'Microscope',
-      component: ResearchWorkspaceMainView,
+      component: workspaceView,
     });
   } catch (e) {}
 
@@ -1553,7 +1904,7 @@ export async function activate(hostCtx: any) {
       id: 'tool_lianyun_course',
       label: '恋云课程',
       icon: 'Microscope',
-      component: ResearchClassroomToolWidget,
+      component: classroomTool,
       position: 12,
     });
   } catch (e) {}
@@ -1563,7 +1914,7 @@ export async function activate(hostCtx: any) {
       id: 'student_lianyun_view',
       label: '课题探究看板',
       icon: 'FileText',
-      component: StudentResearchView,
+      component: studentView,
     });
   } catch (e) {}
 
@@ -1572,19 +1923,21 @@ export async function activate(hostCtx: any) {
       id: 'lianyun_course_dashboard',
       label: '恋云课程控制台',
       icon: 'Microscope',
-      component: TeacherWhiteboardWidget,
+      component: dashboardWidget,
     });
   } catch (e) {}
 }
 
 export function deactivate() {
-  if (ctx?.ui) {
-    ctx.ui.unregisterExtensionPoint('teacher.tab', 'tab_lianyun_course');
-    ctx.ui.unregisterExtensionPoint('workspace.view', 'lianyun_course_workspace');
-    ctx.ui.unregisterExtensionPoint('classroom.tool', 'tool_lianyun_course');
-    ctx.ui.unregisterExtensionPoint('student.view', 'student_lianyun_view');
-    ctx.ui.unregisterExtensionPoint('teacher.dashboard.widget', 'lianyun_course_dashboard');
+  const host = hostCtxRef;
+  if (host?.ui) {
+    host.ui.unregisterExtensionPoint('teacher.tab', 'tab_lianyun_course');
+    host.ui.unregisterExtensionPoint('workspace.view', 'lianyun_course_workspace');
+    host.ui.unregisterExtensionPoint('classroom.tool', 'tool_lianyun_course');
+    host.ui.unregisterExtensionPoint('student.view', 'student_lianyun_view');
+    host.ui.unregisterExtensionPoint('teacher.dashboard.widget', 'lianyun_course_dashboard');
   }
+  hostCtxRef = null;
 }
 
 export default { activate, deactivate, ResearchWorkspaceMainView, ResearchClassroomToolWidget, TeacherWhiteboardWidget, StudentResearchView };

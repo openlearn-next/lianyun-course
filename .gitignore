@@ -1,3 +1,8 @@
 node_modules/
 dist/
 *.zip
+logs/
+
+# 项目统一使用 pnpm。npm 的 lockfile 与 pnpm-lock.yaml 不应同时存在，
+# 防止新人误用 npm install 锁住与 pnpm 不一致的依赖版本。
+package-lock.json
