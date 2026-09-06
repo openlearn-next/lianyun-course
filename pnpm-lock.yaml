@@ -4,13 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@openlearn/plugin-sdk@3.4.3': a417bd614b485c4ea33b9fe803213c8882a1118c3220ad24ce2c5c937fe0dd37
+
 importers:
 
   .:
     dependencies:
       '@openlearn/plugin-sdk':
         specifier: ^3.4.3
-        version: 3.4.3(zod@4.4.3)
+        version: 3.4.3(patch_hash=a417bd614b485c4ea33b9fe803213c8882a1118c3220ad24ce2c5c937fe0dd37)(zod@4.4.3)
       react:
         specifier: '>=17'
         version: 19.2.8
@@ -1465,7 +1468,7 @@ snapshots:
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
-  '@openlearn/plugin-sdk@3.4.3(zod@4.4.3)':
+  '@openlearn/plugin-sdk@3.4.3(patch_hash=a417bd614b485c4ea33b9fe803213c8882a1118c3220ad24ce2c5c937fe0dd37)(zod@4.4.3)':
     dependencies:
       esbuild: 0.25.12
       jszip: 3.10.1

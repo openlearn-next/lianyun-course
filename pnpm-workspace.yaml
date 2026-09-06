@@ -2,3 +2,5 @@ allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
   - '@openlearn/plugin-sdk@3.4.3'
+patchedDependencies:
+  '@openlearn/plugin-sdk@3.4.3': patches/@openlearn__plugin-sdk@3.4.3.patch
