@@ -31,6 +31,8 @@ npx openlearn-plugin-sdk build
 
 构建产物位于 `dist/`，包含 `index.js`（服务端）和 `frontend.js`（前端）。打包后的 ZIP 归档可直接在管理后台上传安装。
 
+> **关于 zip 输出位置**：`@openlearn/plugin-sdk` 的 `cli.mjs` 会同时在 `dist/lianyun-course.zip` 和仓库根 `lianyun-course.zip` 写入**字节相同的两份** zip。上传任一份即可；之所以双份输出是 SDK 的设计，未做清理是为了避免与上游行为偏离。
+
 ### 平台安装
 
 1. 登录 OpenLearn Next 管理后台

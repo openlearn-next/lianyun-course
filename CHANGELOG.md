@@ -4,6 +4,11 @@ All notable changes to the **恋云课程 (Lianyun Course) Plugin** (`lianyun-co
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.5] - 2026-09-06
+
+### Fixed
+- **manifest.main 路径错误**：`manifest.main` 之前写作 `'dist/index.js'`，但 `@openlearn/plugin-sdk@3.4.x` 的 `cli.mjs` 打包时把 `index.js`、`manifest.json`、`frontend.js` **平铺在 zip 根目录**，并不带 `dist/` 前缀。运行时按 `manifest.main` 查找入口抛 `Entry file "dist/index.js" specified in manifest not found in ZIP package`。改为 `'index.js'` 后重新 build，路径与 zip 内文件位置一致。
+
 ## [1.2.4] - 2026-07-27
 
 ### Security
