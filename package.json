@@ -13,7 +13,7 @@
     "test:watch": "NODE_ENV=production vitest"
   },
   "dependencies": {
-    "@openlearn/plugin-sdk": "^3.4.3"
+    "@openlearn/plugin-sdk": "^3.6.0"
   },
   "peerDependencies": {
     "react": ">=17",

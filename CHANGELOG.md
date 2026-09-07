@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **manifest.main 路径错误**：`manifest.main` 之前写作 `'dist/index.js'`，但 `@openlearn/plugin-sdk@3.4.x` 的 `cli.mjs` 打包时把 `index.js`、`manifest.json`、`frontend.js` **平铺在 zip 根目录**，并不带 `dist/` 前缀。运行时按 `manifest.main` 查找入口抛 `Entry file "dist/index.js" specified in manifest not found in ZIP package`。改为 `'index.js'` 后重新 build，路径与 zip 内文件位置一致。
-- **SDK `node:fs` / `node:path` 透传进 bundle**：上传时 OpenLearn 平台端 `openlearn-token-enforcer` 拒绝 plugin bundle 包含除相对路径与 `@openlearn/*` 之外的任何 import。根因是 `@openlearn/plugin-sdk@3.4.3` 的 `cli.mjs` 在 `onResolve` 钩子里把 `@openlearn/plugin-sdk` 解析到了 SDK 自身文件路径，导致 esbuild 把 SDK 整段 inline 进 plugin bundle；SDK 内部 `server/utils/logger.ts` 顶层 `import pino from "pino"` / `import fs from "node:fs"` / `import path from "node:path"` 跟着透传出来。修复方式为给 SDK 打 patch（`patches/@openlearn__plugin-sdk@3.4.3.patch`），让 `onResolve` 返回 `{ path: '@openlearn/plugin-sdk', external: true }`，SDK 恢复 external 状态，bundle 体积从 7.7 MB 降至 1.3 MB。已在 `pnpm-workspace.yaml` 配置 `patchedDependencies`，`pnpm install --no-frozen-lockfile` 后会自动应用。
+- **SDK `node:fs` / `node:path` 透传进 bundle（升级到 3.6.0 获得上游修复）**：上传时 OpenLearn 平台端 `openlearn-token-enforcer` 拒绝 plugin bundle 包含除相对路径与 `@openlearn/*` 之外的任何 import。根因是 `@openlearn/plugin-sdk@3.4.x` 的 `cli.mjs` 在 `onResolve` 钩子里把 `@openlearn/plugin-sdk` 解析到了 SDK 自身文件路径，导致 esbuild 把 SDK 整段 inline 进 plugin bundle；SDK 内部 `server/utils/logger.ts` 顶层 `import pino from "pino"` / `import fs from "node:fs"` / `import path from "node:path"` 跟着透传出来。上游在 3.6.0 正式修复（`resolve-plugin-sdk` 钩子被删除，裸说明符依赖 esbuild `external` 数组正确保留），升级依赖到 `^3.6.0` 后 bundle 体积从 7.7 MB 降至 1.3 MB，`node:fs` / `node:path` / `pino` 透传全部消除。
 
 ## [1.2.4] - 2026-07-27
 
