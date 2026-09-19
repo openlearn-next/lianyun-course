@@ -4,6 +4,13 @@ All notable changes to the **恋云课程 (Lianyun Course) Plugin** (`lianyun-co
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.6] - 2026-09-19
+
+### Fixed
+- **声明 `executionMode: 'inline'`**：由于插件需要创建业务表（`plugin_research_activities`、`plugin_research_groups`、`plugin_research_submissions`、`plugin_research_reviews`），在默认 Worker 隔离沙箱中执行 DDL 会触发平台安全策略报错（`Worker plugin "lianyun-course" is not permitted to perform DDL`），导致 Worker 异常崩溃并标记插件错误。显式声明 `executionMode: 'inline'` 使插件以受信任内联模式运行。
+- **添加 `await` 到 `rawDb.exec`**：在 `initServicesAndDb` 中为建表与 `ALTER TABLE` 调用补齐 `await`，防止跨进程/异步 RPC 时底层 Promise rejection 脱离同步 `try...catch` 范围成为 `unhandledRejection`。
+- **补充项目根目录 `manifest.json`**：确保 `openlearn-plugin-sdk build` 打包时 100% 精确生成 ZIP 内的 `manifest.json` 配置。
+
 ## [1.2.5] - 2026-09-06
 
 ### Fixed

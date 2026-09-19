@@ -194,8 +194,9 @@ export default {
   manifest: {
     id: 'lianyun-course',
     name: '恋云课程',
-    version: '1.2.5',
+    version: '1.2.6',
     main: 'index.js',
+    executionMode: 'inline',
     description: '恋云课程 —— PBL / STEAM 课题全流程管理、多版本提交、盲审互评、积分入账与结构化 ZIP 归档的全栈参考插件',
     author: 'OpenLearn Next',
     repository: 'https://github.com/openlearn-next/lianyun-course',
@@ -265,7 +266,7 @@ export default {
         rawDb = await resolveWithTimeout(IDatabaseToken);
         if (rawDb?.exec) {
           try {
-            rawDb.exec(`
+            await rawDb.exec(`
               CREATE TABLE IF NOT EXISTS plugin_research_activities (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -317,7 +318,7 @@ export default {
             // 向后兼容：v1.2.3 之前的 activities 表没有 class_id 列。
             // 老用户升级后需要手动 ALTER 添加该列。
             try {
-              rawDb.exec(`ALTER TABLE plugin_research_activities ADD COLUMN class_id TEXT`);
+              await rawDb.exec(`ALTER TABLE plugin_research_activities ADD COLUMN class_id TEXT`);
             } catch { /* 列已存在，忽略 */ }
           } catch (e) {
             ctx.log?.warn('[lianyun-course] CREATE TABLE failed:', e);

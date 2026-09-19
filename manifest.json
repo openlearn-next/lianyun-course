@@ -1,0 +1,46 @@
+{
+  "id": "lianyun-course",
+  "name": "恋云课程",
+  "version": "1.2.6",
+  "main": "index.js",
+  "executionMode": "inline",
+  "description": "恋云课程 —— PBL / STEAM 课题全流程管理、多版本提交、盲审互评、积分入账与结构化 ZIP 归档的全栈参考插件",
+  "author": "OpenLearn Next",
+  "repository": "https://github.com/openlearn-next/lianyun-course",
+  "homepage": "https://github.com/openlearn-next/lianyun-course",
+  "engines": {
+    "openlearn": ">= 0.1.12"
+  },
+  "requires": [
+    "@openlearn/core:ICommandBusService@^1.0.0",
+    "@openlearn/core:IEventBusService@^1.0.0",
+    "@openlearn/core:IActionRegistryService@^1.0.0",
+    "@openlearn/core:IStorageService@^1.0.0",
+    "@openlearn/core:IDatabase@^1.0.0",
+    "@openlearn/core:IProcessService@^1.0.0",
+    "@openlearn/core:IPointsLedgerService@^1.0.0",
+    "@openlearn/core:IPointsDimensionRegistry@^1.0.0",
+    "@openlearn/activity-ecosystem:IActivityRegistry@^1.0.0"
+  ],
+  "capabilitiesProposed": [
+    "research:read",
+    "research:write",
+    "research:review",
+    "research:export"
+  ],
+  "classroomTools": [
+    {
+      "id": "tool_lianyun_course",
+      "name": "恋云课程",
+      "icon": "Microscope",
+      "commandType": "research.create_activity",
+      "payload": {
+        "type": "plugin",
+        "data": {
+          "teacherWidgetId": "lianyun_course_dashboard",
+          "width": 480
+        }
+      }
+    }
+  ]
+}
