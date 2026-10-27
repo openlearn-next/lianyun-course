@@ -4,6 +4,11 @@ All notable changes to the **恋云课程 (Lianyun Course) Plugin** (`lianyun-co
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.7] - 2026-10-27
+
+### Fixed
+- **manifest 补声明 `student-data:write` 能力**：宿主平台自 v0.6.x 起（#170）对 `IPointsLedgerService.addPoints` 施加 `student-data:write` 能力门禁，缺失时抛 `PluginCapabilityDeniedError`（先审计后抛错）。本插件「积分入账」功能依赖 `addPoints`，但 capabilitiesProposed 只有 `research:*`，在新宿主上积分入账会被拒绝（代码里有 catch 只 warn，表现为静默失败）。补声明后需管理员在审批 UI 确认授予。
+
 ## [1.2.6] - 2026-09-19
 
 ### Fixed
